@@ -1,7 +1,7 @@
 from __future__ import annotations
-from includes import *
+from .includes import *
 
-from access_gh import get_repo_dir
+from .access_gh import get_repo_dir
 
 RepoStructureType = Dict[str, Union[ContentFile, "RepoStructureType"]]
 

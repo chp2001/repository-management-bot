@@ -1,3 +1,7 @@
 {
-    "python.analysis.typeCheckingMode": "basic"
+    "python.analysis.typeCheckingMode": "basic",
+    // Code runner run python module: /module_name/__main__.py -> python -m module_name
+    "code-runner.executorMapByGlob": {
+        "__main__.py": "cd $(dirname $fullFileName) && cd .. && python -m $(basename $(dirname $fullFileName)) $(echo $(pwd)>&2)"
+    },
 }

@@ -1,7 +1,7 @@
-from includes import *
+from .includes import *
     
-from access_gh import get_org_repo
-from repo_detail import get_repo_structure, RepoStructureType
+from .access_gh import get_org_repo
+from .repo_detail import get_repo_structure, RepoStructureType
 
 AWI_ORG_NAME = "AlabamaWaterInstitute"
 AWI_TEMPLATE_REPO = "awi-open-source-project-template"

@@ -1,4 +1,4 @@
-from includes import *
+from .includes import *
 import subprocess
 
 def check_output(cmd: str, **kwargs)->str:
@@ -16,10 +16,10 @@ def check_output(cmd: str, **kwargs)->str:
             return result.decode("utf-8")
         return result
     
-from access_gh import get_user, get_org, get_org_repos, get_org_repo, get_user_repo
+from .access_gh import get_user, get_org, get_org_repos, get_org_repo, get_user_repo
 
-from get_template_details import RepoTemplate, AWI_TEMPLATE_REPO, AWI_ORG_NAME
-from repo_detail import get_repo_structure, RepoStructureType
+from .get_template_details import RepoTemplate, AWI_TEMPLATE_REPO, AWI_ORG_NAME
+from .repo_detail import get_repo_structure, RepoStructureType
 
 TEMPLATE = RepoTemplate(AWI_ORG_NAME, AWI_TEMPLATE_REPO)
 CLONE_DIR = Path("clones")

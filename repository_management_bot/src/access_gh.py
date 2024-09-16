@@ -1,4 +1,4 @@
-from includes import *
+from .includes import *
 from github import Github
 
 @cache

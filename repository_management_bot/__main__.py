@@ -1,8 +1,12 @@
-from build_pr import template_compliance_prs
+from .src.build_pr import template_compliance_prs
+from .cli.arguments import DefaultArgParse
 
 if __name__ == "__main__":
     org = "AlabamaWaterInstitute"
     repo = "awi-open-source-project-template"
+    arg = DefaultArgParse.parse_args()
+    org = arg["org"]
+    repo = arg["repo"]
     # This is the main entry point for the program
     # It will list repositories in the {org} organization, and what files are missing from each repository
     # It will query the user for which repositories to create PRs for, and then create the PRs

@@ -8,7 +8,7 @@ from github.PullRequest import PullRequest
 from typing import List, Tuple, Dict, Set, Any, Union, Callable, Literal, Optional, TypeVar
 import os, sys, json
 from pathlib import Path
-from caching import cache, cache_stats
+from .caching import cache, cache_stats
 import warnings
 User = Union[NamedUser, AuthenticatedUser]
 
