@@ -1,41 +1,10 @@
-from github import Github
-from github import Auth
-from github.NamedUser import NamedUser
-from github.AuthenticatedUser import AuthenticatedUser
-from github.Organization import Organization
-from github.Repository import Repository
-from github.Branch import Branch
-from github.ContentFile import ContentFile
-from github.PullRequest import PullRequest
-from github.Issue import Issue
-from github.IssueComment import IssueComment
-from github.Label import Label
-from typing import List, Tuple, Dict, Set, Any, Union, Callable, Literal, Optional, TypeVar
-import os, sys, json
-from pathlib import Path
-# from functools import cache
-from caching import cache, cache_stats
-User = Union[NamedUser, AuthenticatedUser]
-
-customtab = "    "
-def fprint(*args, **kwargs):
-    _args = []
-    for arg in args:
-        if isinstance(arg, str):
-            _args.append(arg.replace("\t", customtab))
-        else:
-            _args.append(arg)
-    args = _args
-    for k, v in kwargs.items():
-        if isinstance(v, str):
-            kwargs[k] = v.replace("\t", customtab)
-    print(*args, file=sys.stderr, **kwargs)
+from includes import *
     
-from access_gh import get_Github, get_org_repo, get_repo_dir, get_repo_file
+from access_gh import get_org_repo
 from repo_detail import get_repo_structure, RepoStructureType
 
-ORG_NAME = "AlabamaWaterInstitute"
-TEMPLATE_REPO = "awi-open-source-project-template"
+AWI_ORG_NAME = "AlabamaWaterInstitute"
+AWI_TEMPLATE_REPO = "awi-open-source-project-template"
 
 def search_content_list(content_list: List[ContentFile], name: str)->Optional[ContentFile]:
     for content in content_list:
@@ -45,8 +14,9 @@ def search_content_list(content_list: List[ContentFile], name: str)->Optional[Co
 
 @cache
 def get_template_details():
-    repo = get_org_repo(ORG_NAME, TEMPLATE_REPO)
-    repo_dir = get_repo_dir(repo, "")
+    repo = get_org_repo(AWI_ORG_NAME, AWI_TEMPLATE_REPO)
+    repo_dir = repo.get_contents("")
+    repo_dir = [repo_dir] if isinstance(repo_dir, ContentFile) else repo_dir
     repo_file = search_content_list(repo_dir, "README.md")
     return repo, repo_dir, repo_file
 
@@ -62,22 +32,10 @@ class RepoTemplate:
         self.file_prefabs = {}
         self.load_structure()
         
-    def get_prefab(self, content_file: ContentFile, path: str)->Dict[str, Any]:
-        file_prefab = {}
-        file_prefab["name"] = content_file.name
-        file_prefab["path"] = path
-        file_prefab["size"] = content_file.size
-        file_prefab["download_url"] = content_file.download_url
-        file_prefab["type"] = content_file.type
-        file_prefab["encoding"] = content_file.encoding
-        file_prefab["contentFile"] = content_file
-        self.file_prefabs[path] = file_prefab
-        return file_prefab
         
     def load_structure(self, subdir: str = "", substruct: Optional[RepoStructureType] = None)->RepoStructureType:
         def file_registerer(content: ContentFile, path: str):
             self.file_list.append(Path(path))
-            self.get_prefab(content, path)
         self.template_structure = get_repo_structure(self.template_repo, subdir, file_registerer)
         return self.template_structure
     
@@ -145,6 +103,6 @@ if __name__ == "__main__":
     repo, repo_dir, repo_file = get_template_details()
     fprint(repo, repo_dir, repo_file)
     
-    template = RepoTemplate(ORG_NAME, TEMPLATE_REPO)
+    template = RepoTemplate(AWI_ORG_NAME, AWI_TEMPLATE_REPO)
     template.print_structure()
     cache_stats()

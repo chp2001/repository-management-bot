@@ -1,42 +1,6 @@
-from github import Github
-from github import Auth
-from github.NamedUser import NamedUser
-from github.AuthenticatedUser import AuthenticatedUser
-from github.Organization import Organization
-from github.Repository import Repository
-from github.Branch import Branch
-from github.ContentFile import ContentFile
-from github.PullRequest import PullRequest
-from github.Issue import Issue
-from github.IssueComment import IssueComment
-from github.Label import Label
-from github.Commit import Commit
-from typing import List, Tuple, Dict, Set, Any, Union, Callable, Literal, Optional, TypeVar
-import os, sys, json, subprocess
-from pathlib import Path
-import warnings
-import contextlib
-# from functools import cache
-from caching import cache, cache_stats
-User = Union[NamedUser, AuthenticatedUser]
+from includes import *
+import subprocess
 
-
-customtab = "    "
-def fprint(*args, **kwargs):
-    _args = []
-    for arg in args:
-        if isinstance(arg, str):
-            _args.append(arg.replace("\t", customtab))
-        else:
-            _args.append(arg)
-    args = _args
-    for k, v in kwargs.items():
-        if isinstance(v, str):
-            kwargs[k] = v.replace("\t", customtab)
-    lineno = sys._getframe(1).f_lineno
-    args.insert(0, f"{lineno}:")
-    print(*args, file=sys.stderr, **kwargs)
-    
 def check_output(cmd: str, **kwargs)->str:
     try:
         kwargs["shell"] = True
@@ -54,10 +18,10 @@ def check_output(cmd: str, **kwargs)->str:
     
 from access_gh import get_user, get_org, get_org_repos, get_org_repo, get_user_repo
 
-from get_template_details import RepoTemplate, TEMPLATE_REPO, ORG_NAME
+from get_template_details import RepoTemplate, AWI_TEMPLATE_REPO, AWI_ORG_NAME
 from repo_detail import get_repo_structure, RepoStructureType
 
-TEMPLATE = RepoTemplate(ORG_NAME, TEMPLATE_REPO)
+TEMPLATE = RepoTemplate(AWI_ORG_NAME, AWI_TEMPLATE_REPO)
 CLONE_DIR = Path("clones")
 
 if not CLONE_DIR.exists():
@@ -381,7 +345,7 @@ def template_compliance_prs(org: str, template_repo: str):
 if __name__ == "__main__":
     def test_permissions():
         # Get the 'bmi_rainrate' repo
-        repo = get_org_repo(ORG_NAME, "bmi_rainrate")
+        repo = get_org_repo(AWI_ORG_NAME, "bmi_rainrate")
         perms = get_repo_permissions(repo)
         fprint(perms)
     # test_permissions()
@@ -410,6 +374,6 @@ if __name__ == "__main__":
     # test_full_pr()
     
     def test_template_compliance_prs():
-        template_compliance_prs(ORG_NAME, TEMPLATE_REPO)
+        template_compliance_prs(AWI_ORG_NAME, AWI_TEMPLATE_REPO)
         
     # test_template_compliance_prs()

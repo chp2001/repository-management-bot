@@ -1,34 +1,5 @@
+from includes import *
 from github import Github
-from github import Auth
-from github.NamedUser import NamedUser
-from github.AuthenticatedUser import AuthenticatedUser
-from github.Organization import Organization
-from github.Repository import Repository
-from github.Branch import Branch
-from github.ContentFile import ContentFile
-from github.PullRequest import PullRequest
-from github.Issue import Issue
-from github.IssueComment import IssueComment
-from github.Label import Label
-from typing import List, Tuple, Dict, Set, Any, Union, Callable, Literal, Optional, TypeVar
-import os, sys, json
-# from functools import cache
-from caching import cache, cache_stats
-User = Union[NamedUser, AuthenticatedUser]
-
-customtab = "    "
-def fprint(*args, **kwargs):
-    _args = []
-    for arg in args:
-        if isinstance(arg, str):
-            _args.append(arg.replace("\t", customtab))
-        else:
-            _args.append(arg)
-    args = _args
-    for k, v in kwargs.items():
-        if isinstance(v, str):
-            kwargs[k] = v.replace("\t", customtab)
-    print(*args, file=sys.stderr, **kwargs)
 
 @cache
 def get_auth()->str:
@@ -36,26 +7,6 @@ def get_auth()->str:
     cmd = "gh auth token"
     token = os.popen(cmd).read().strip()
     return token
-
-def get_used_total_rate()->int:
-    ratelimit = json.loads(os.popen("gh api rate_limit").read())
-    total_used = 0
-    for ratetype, rate in ratelimit["resources"].items():
-        total_used += rate["used"]
-    return total_used
-
-class CheckRateContext:
-    start: int
-    end: int
-    def __init__(self):
-        pass
-    def __enter__(self):
-        self.start = get_used_total_rate()
-        return self
-    def __exit__(self, exc_type, exc_value, traceback):
-        self.end = get_used_total_rate()
-        if self.end - self.start > 0:
-            fprint(f"Rate used: {self.end - self.start}")
 
 @cache
 def get_Github()->Github:
@@ -156,12 +107,6 @@ if __name__ == "__main__":
         if "Alabama" in org.login:
             awi = org
             print(f"(awi is {awi.login})")
-        # fprint(f"\t\t{org.collaborators}")
-        # repos = get_org_repos(org.login)
-        # fprint(f"\tRepos:")
-        # for repo in repos:
-        #     fprint(f"\t\t{repo.name}")
-        #     # quicklook(repo)
     fprint("awi-open-source-project-template")
     if awi is None:
         raise ValueError("awi is None")
@@ -174,7 +119,4 @@ if __name__ == "__main__":
             subfiles = get_repo_dir(template_repo, cf.name)
             for sf in subfiles:
                 fprint("\t", sf.name, sf.type)
-    print(get_used_total_rate())
-    print(get_used_total_rate())
-    print(get_used_total_rate())
     cache_stats()
