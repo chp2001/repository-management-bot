@@ -6,11 +6,10 @@ from repo_detail import get_repo_structure, RepoStructureType
 AWI_ORG_NAME = "AlabamaWaterInstitute"
 AWI_TEMPLATE_REPO = "awi-open-source-project-template"
 
-def search_content_list(content_list: List[ContentFile], name: str)->Optional[ContentFile]:
-    for content in content_list:
-        if content.name == name:
-            return content
-    return None
+def search_content_list(content_list: List[ContentFile], name: str) -> Optional[ContentFile]:
+    return next(
+        (content for content in content_list if content.name == name), None
+    )
 
 @cache
 def get_template_details():
@@ -33,7 +32,7 @@ class RepoTemplate:
         self.load_structure()
         
         
-    def load_structure(self, subdir: str = "", substruct: Optional[RepoStructureType] = None)->RepoStructureType:
+    def load_structure(self, subdir: str = "")->RepoStructureType:
         def file_registerer(content: ContentFile, path: str):
             self.file_list.append(Path(path))
         self.template_structure = get_repo_structure(self.template_repo, subdir, file_registerer)
@@ -44,7 +43,7 @@ class RepoTemplate:
             subtree = self.template_structure
         # fprint("\t"*level, "Structure:")
         if level > 4:
-            raise Exception("Structure too deep")
+            raise RecursionError("Too many levels of recursion")
         for name, content in subtree.items():
             if isinstance(content, dict):
                 fprint("\t"*level, f"{name}/:")
@@ -90,9 +89,8 @@ class RepoTemplate:
                     alldiff(name)
                     continue
         recurse_diff(self.template_structure, other_structure, diff_structure)
-        if "README.md" not in diff_structure:
-            if "doc" in diff_structure:
-                del diff_structure["doc"]
+        if "README.md" not in diff_structure and "doc" in diff_structure:
+            del diff_structure["doc"]
         return diff_structure
     
     def compare_repo(self, repo: Repository)->RepoStructureType:
