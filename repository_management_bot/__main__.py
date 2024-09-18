@@ -1,9 +1,17 @@
 from .src.build_pr import template_compliance_prs
-from .cli.arguments import DefaultArgParse
+from .cli.arguments import DefaultArgParse, ProgInfoExp
 
 if __name__ == "__main__":
-    org = "AlabamaWaterInstitute"
-    repo = "awi-open-source-project-template"
+    proginfo: ProgInfoExp = ProgInfoExp(
+        info_type = "explicit",
+        program_name = "Repository Management Bot",
+        program_description = "A bot to manage repositories and ensure that they are up to date with a template repository",
+        program_version = "unversioned prototype",
+        program_author = "Chad Perry",
+        program_github_link="https://github.com/chp2001/repository-management-bot",
+        program_header = None
+    )
+    DefaultArgParse.add_prog_info(proginfo)
     arg = DefaultArgParse.parse_args()
     org = arg["org"]
     repo = arg["repo"]

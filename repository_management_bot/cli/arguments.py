@@ -1,4 +1,4 @@
-from typing import List, Tuple, Dict, Set, Any, Union, Callable, Literal, Optional, TypeVar
+from typing import List, Tuple, Dict, Set, Any, Union, Callable, Literal, Optional, TypeVar, TypedDict
 import sys
 ArgTupleType = Tuple[Tuple[Any,...], Dict[str, Any]]
 def argtuple(*args: Any, **kwargs: Any) -> ArgTupleType:
@@ -65,7 +65,27 @@ class argtype:
             else:
                 argdict[kwarg] = self.kwargs[kwarg]
         return argdict
-    
+
+ProgInfoExp = TypedDict(
+    "ProgInfoExp", # Store pieces of ProgInfo explicitly, rather than as a single string
+    {
+        "info_type": Literal["explicit"],
+        "program_name": str,
+        "program_github_link": Optional[str],
+        "program_version": str,
+        "program_author": str,
+        "program_description": Optional[str],
+        "program_header": Optional[str]
+    }
+)
+ProgInfoStr = TypedDict(
+    "ProgInfoStr", # Store ProgInfo as a single string
+    {
+        "info_type": Literal["string"],
+        "program_header": str
+    }
+)
+ProgInfoType = Union[ProgInfoExp, ProgInfoStr]
 class argparser:
     """## argparser
     class for parsing command line arguments
@@ -78,13 +98,84 @@ class argparser:
     "a dictionary of argument aliases. derived from arg_configs"
     arg_type: argtype # Argument type object
     "an argument type object. derived from arg_configs"
+    prog_info: Optional[ProgInfoType] # Program header
+    """program information.
+    <br> if explicit information is provided, additional arguments are allowed, and a header will be generated (if not provided)
+    <br> otherwise only a header will be prepended to the help message"""
+    default_args: Dict[str, ArgTupleType] = {
+        "help": argtuple("-h", "--help", default=False, argtype=bool, help="Show this help message and exit")
+    }
+    "a dictionary of default arguments provided by the class"
+    conditional_args: Dict[str, ArgTupleType] = {
+        "program_version": argtuple("-v", "--version", default=False, argtype=bool, help="Show program version and exit"),
+        "program_header": argtuple("-i", "--info", default=False, argtype=bool, help="Show program information and exit")
+    }
+    "a dictionary of conditional arguments provided by the class"
+    __initialized: bool = False
     def __init__(self, arg_configs: List[ArgTupleType]):
         self.arg_configs = arg_configs
         self.arg_config_by_name = {}
         self.arg_aliases = {}
+        self.prog_info = None
+        self.__initialized = False
+    def setup(self):
+        if self.__initialized:
+            return
+        self.arg_type, self.arg_config_by_name, self.arg_aliases = self.initialize_arg_type()
+        self.initialize_prog_info()
+        self.__initialized = True
+    def add_prog_info(self, prog_info: ProgInfoType):
+        """## add_prog_info
+        add program information to the argument parser
+        
+        ### Parameters:
+        - `prog_info: ProgInfoType` - the program information to add
+        """
+        self.prog_info = prog_info
+    def initialize_prog_info(self):
+        if self.prog_info is None:
+            return
+        if self.prog_info["info_type"] == "explicit":
+            if self.prog_info["program_header"] is None:
+                header = ""
+                version_str = self.prog_info["program_version"]
+                if version_str.isnumeric():
+                    version_str = f"v{version_str}"
+                header += f"{self.prog_info['program_name']} [{version_str}]\n"
+                if "program_author" in self.prog_info:
+                    header += f"by {self.prog_info['program_author']}"
+                    if "program_github_link" in self.prog_info:
+                        header += f" (at {self.prog_info['program_github_link']})"
+                    header += "\n"
+                if "program_description" in self.prog_info:
+                    header += f"{self.prog_info['program_description']}\n"
+                self.prog_info["program_header"] = header
+        elif self.prog_info["info_type"] == "string":
+            pass
+        else:
+            raise ValueError(f"unknown program info type: {self.prog_info['info_type']}")
+    def initialize_arg_type(self)->Tuple[argtype, Dict[str, ArgTupleType], Dict[str, str]]:
+        """## initialize_arg_type
+        initialize the argument type object
+        
+        ### Returns:
+        - `Tuple[argtype, Dict[str, ArgTupleType], Dict[str, str]]` - the argument type object, the argument configurations by name, and the argument aliases
+        """
+        arg_configs = self.arg_configs
+        arg_config_by_name = {}
+        arg_aliases = {}
         posargs = []
         kwargs = {}
-        self.add_help_arg(arg_configs)
+        for name, config in self.default_args.items():
+            arg_configs.append(config)
+        for name, config in self.conditional_args.items():
+            if "program" in name:
+                if self.prog_info is None:
+                    continue
+                if name in self.prog_info:
+                    arg_configs.append(config)
+            else:
+                raise ValueError(f"unknown conditional argument: {name}")
         for arg_config in arg_configs:
             names, config_kwargs = arg_config
             posnames = [name for name in names if not name.startswith("-")]
@@ -97,23 +188,60 @@ class argparser:
                 raise ValueError(f"multiple long names in {names}")
             if len(posnames) > 1:
                 raise ValueError(f"multiple positional names in {names}")
-            self.arg_config_by_name[long_name] = arg_config
+            arg_config_by_name[long_name] = arg_config
             for name in names:
                 _name = name.lstrip("-")
-                self.arg_aliases[_name] = long_name
+                arg_aliases[_name] = long_name
             if posnames:
                 posargs.append(posnames[0])
             if longnames:
                 kwargs[long_name] = config_kwargs["default"]
         # print(posargs, kwargs)
         # print(self.arg_aliases)
-        self.arg_type = argtype(*posargs, **kwargs)
-    def add_help_arg(self, arglist: List[ArgTupleType]):
-        """## add_help_arg
-        add a help argument to the argument configurations
+        arg_type = argtype(*posargs, **kwargs)
+        return arg_type, arg_config_by_name, arg_aliases
+    def help_message(self):
+        """## help_message
+        print the help message
         """
-        argtup = argtuple("-h", "--help", default=False, argtype=bool, help="Show this help message and exit")
-        arglist.append(argtup)
+        self.setup()
+        if self.prog_info is not None:
+            if self.prog_info["info_type"] == "explicit":
+                print(self.prog_info["program_header"])
+            elif self.prog_info["info_type"] == "string":
+                print(self.prog_info["program_header"])
+            else:
+                raise ValueError(f"unknown program info type: {self.prog_info['info_type']}")
+        print("Usage:")
+        for names, config in self.arg_configs:
+            helpstr = config.get("help", "")
+            if "default" in config:
+                helpstr += f" (default: {config['default']})"
+            print("\t" + ", ".join(names) + " - " + helpstr)
+    def version_message(self):
+        """## version_message
+        print the version message
+        """
+        self.setup()
+        if self.prog_info is not None and "program_version" in self.prog_info:
+            version_str = self.prog_info["program_version"]
+            if version_str.isnumeric():
+                version_str = f"v{version_str}"
+            print(f"{self.prog_info['program_name']} [{version_str}]")
+        else:
+            raise ValueError(f"unexpected call to version_message without program version")
+    def info_message(self):
+        """## info_message
+        print the info message
+        """
+        self.setup()
+        if self.prog_info is not None:
+            if self.prog_info["info_type"] == "explicit":
+                print(self.prog_info["program_header"])
+            elif self.prog_info["info_type"] == "string":
+                print(self.prog_info["program_header"])
+            else:
+                raise ValueError(f"unknown program info type: {self.prog_info['info_type']}")
     def parse_argv(self)->ArgTupleType:
         """## parse_argv
         parse the command line arguments
@@ -155,19 +283,19 @@ class argparser:
         ### Returns:
         - `Dict[str, Any]` - the dictionary of argument names and values
         """
+        self.setup()
         result = self.arg_type.parse(self.parse_argv())
         for arg_name, config in self.arg_configs:
             if arg_name in result and isinstance(result[arg_name], str) and "argtype" in config:
                 result[arg_name] = config["argtype"](result[arg_name])
-        # print(result)
-        # input()
         if result["help"]:
-            print("Usage:")
-            for names, config in self.arg_configs:
-                helpstr = config.get("help", "")
-                if "default" in config:
-                    helpstr += f" (default: {config['default']})"
-                print("\t" + ", ".join(names) + " - " + helpstr)
+            self.help_message()
+            sys.exit(0)
+        if result.get("version", False):
+            self.version_message()
+            sys.exit(0)
+        if result.get("info", False):
+            self.info_message()
             sys.exit(0)
         return result
 
