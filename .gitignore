@@ -79,3 +79,4 @@ dist/
 # Github Access Files #
 ghcache/
 clones/
+tempscripts/
