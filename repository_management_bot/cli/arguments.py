@@ -288,7 +288,7 @@ class argparser:
         for arg_name, config in self.arg_configs:
             if arg_name in result and isinstance(result[arg_name], str) and "argtype" in config:
                 result[arg_name] = config["argtype"](result[arg_name])
-        if result["help"]:
+        if result["help"] or (not any(result.values())):
             self.help_message()
             sys.exit(0)
         if result.get("version", False):
@@ -299,22 +299,63 @@ class argparser:
             sys.exit(0)
         return result
 
+# arg_configs = [
+#     argtuple(
+#         "org",
+#         "--org",
+#         "-o",
+#         default="AlabamaWaterInstitute",
+#         argtype=str,
+#         help="The organization to check for template compliance"
+#     ),
+#     argtuple(
+#         "repo",
+#         "--repo",
+#         "-r",
+#         default="awi-open-source-project-template",
+#         argtype=str,
+#         help="The repository to check for template compliance"
+#     )
+# ]
+
+# python -m repository_management_bot --org AlabamaWaterInstitute --template awi-open-source-project-template
+#   Test all repositories in the AlabamaWaterInstitute organization against the awi-open-source-project-template repository
+# OR
+# python -m repository_management_bot --repo fakeUser/fakeRepo --template AlabamaWaterInstitute/awi-open-source-project-template
+#   Test the fakeRepo repository owned by fakeUser against the awi-open-source-project-template repository in the AlabamaWaterInstitute organization
+
 arg_configs = [
     argtuple(
         "org",
         "--org",
         "-o",
-        default="AlabamaWaterInstitute",
+        default=None,
         argtype=str,
-        help="The organization to check for template compliance"
+        help="A target organization to check for template compliance"
+    ),
+    argtuple(
+        "template",
+        "--template",
+        "-t",
+        default=None,
+        argtype=str,
+        help="The template repository to check against. If org is not provided, this should be in the format 'owner/repo', otherwise it can be just 'repo'"
     ),
     argtuple(
         "repo",
         "--repo",
         "-r",
-        default="awi-open-source-project-template",
+        default=None,
         argtype=str,
-        help="The repository to check for template compliance"
+        help="A specific repository to check for template compliance. If org is not provided, this should be in the format 'owner/repo', otherwise it can be just 'repo'"
+    ),
+    argtuple(
+        "user",
+        "--user",
+        "-u",
+        default=None,
+        argtype=str,
+        help="A specific user to check for template compliance."
     )
 ]
 

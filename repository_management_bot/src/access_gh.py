@@ -14,24 +14,26 @@ def get_Github()->Github:
     return Github(token)
 
 @cache
-def get_user()->User:
-    return get_Github().get_user()
+def get_user(name: Optional[str] = None)->User:
+    if name is None:
+        return get_Github().get_user()
+    return get_Github().get_user(name)
 
 @cache
 def get_org(org: str)->Organization:
     return get_Github().get_organization(org)
 
 @cache
-def get_user_orgs()->List[Organization]:
-    return list(get_user().get_orgs())
+def get_user_orgs(name: Optional[str] = None)->List[Organization]:
+    return list(get_user(name).get_orgs())
 
 @cache
-def get_user_repos()->List[Repository]:
-    return list(get_user().get_repos())
+def get_user_repos(name: Optional[str] = None)->List[Repository]:
+    return list(get_user(name).get_repos())
 
 @cache
-def get_user_repo(repo: str)->Repository:
-    return get_user().get_repo(repo)
+def get_user_repo(repo: str, user: Optional[str] = None)->Repository:
+    return get_user(user).get_repo(repo)
 
 @cache
 def get_org_repos(org: str)->List[Repository]:
@@ -40,6 +42,27 @@ def get_org_repos(org: str)->List[Repository]:
 @cache
 def get_org_repo(org: str, repo: str)->Repository:
     return get_Github().get_organization(org).get_repo(repo)
+
+@cache
+def get_repo(repo: str)->Repository:
+    """get_repo
+    Get a repository by name
+    
+    args:
+        repo: str - the path to the repository, in the form "org/repo" or "user/repo"
+    returns:
+        Repository - the repository object
+    """
+    if not "/" in repo:
+        raise ValueError(f"Invalid repo name {repo}")
+    owner, name = repo.split("/")
+    gh = get_Github()
+    try:
+        user = gh.get_user(owner)
+        return user.get_repo(name)
+    except:
+        org = gh.get_organization(owner)
+        return org.get_repo(name)
 
 @cache
 def get_org_members(org: str)->List[NamedUser]:

@@ -1,6 +1,6 @@
 from .includes import *
     
-from .access_gh import get_org_repo
+from .access_gh import get_repo
 from .repo_detail import get_repo_structure, RepoStructureType
 
 AWI_ORG_NAME = "AlabamaWaterInstitute"
@@ -13,7 +13,8 @@ def search_content_list(content_list: List[ContentFile], name: str) -> Optional[
 
 @cache
 def get_template_details():
-    repo = get_org_repo(AWI_ORG_NAME, AWI_TEMPLATE_REPO)
+    # repo = get_org_repo(AWI_ORG_NAME, AWI_TEMPLATE_REPO)
+    repo = get_repo(f"{AWI_ORG_NAME}/{AWI_TEMPLATE_REPO}")
     repo_dir = repo.get_contents("")
     repo_dir = [repo_dir] if isinstance(repo_dir, ContentFile) else repo_dir
     repo_file = search_content_list(repo_dir, "README.md")
@@ -24,8 +25,8 @@ class RepoTemplate:
     template_structure: RepoStructureType
     file_list: List[Path]
     file_prefabs: Dict[str, Dict[str, Any]]
-    def __init__(self, org: str, repo_name: str):
-        self.template_repo = get_org_repo(org, repo_name)
+    def __init__(self, repo_path: str = f"{AWI_ORG_NAME}/{AWI_TEMPLATE_REPO}"):
+        self.template_repo = get_repo(repo_path)
         self.template_structure = {}
         self.file_list = []
         self.file_prefabs = {}
@@ -101,6 +102,6 @@ if __name__ == "__main__":
     repo, repo_dir, repo_file = get_template_details()
     fprint(repo, repo_dir, repo_file)
     
-    template = RepoTemplate(AWI_ORG_NAME, AWI_TEMPLATE_REPO)
+    template = RepoTemplate()
     template.print_structure()
     cache_stats()

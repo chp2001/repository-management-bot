@@ -16,12 +16,12 @@ def check_output(cmd: str, **kwargs)->str:
             return result.decode("utf-8")
         return result
     
-from .access_gh import get_user, get_org, get_org_repos, get_org_repo, get_user_repo
+from .access_gh import get_user, get_user_repos, get_org_repos, get_org_repo, get_user_repo, get_repo
 
 from .get_template_details import RepoTemplate, AWI_TEMPLATE_REPO, AWI_ORG_NAME
 from .repo_detail import get_repo_structure, RepoStructureType
 
-TEMPLATE = RepoTemplate(AWI_ORG_NAME, AWI_TEMPLATE_REPO)
+TEMPLATE = RepoTemplate()
 CLONE_DIR = Path("clones")
 
 if not CLONE_DIR.exists():
@@ -326,7 +326,7 @@ def template_compliance_prs(org: str, template_repo: str):
         template_repo (str): the template repo
     """
     repos = get_org_repos(org)
-    template = RepoTemplate(org, template_repo)
+    template = RepoTemplate(f"{org}/{template_repo}")
     for repo in repos:
         missing, result = check_diff(repo, template)
         if not missing:
@@ -341,7 +341,198 @@ def template_compliance_prs(org: str, template_repo: str):
         else:
             print(f"Skipping {repo.full_name}")
     return
+
+def check_template_compliance_for_repo(repo: Repository, template: RepoTemplate = TEMPLATE) -> Tuple[bool, Optional[RepoStructureType]]:
+    """check_template_compliance_for_repo
+    Check if the repo is compliant with the template
     
+    Args:
+        repo (Repository): the target repo
+    Returns:
+        missing (bool): whether the repo is missing files
+        result (Optional[RepoStructureType]): the missing files
+    """
+    missing, result = check_diff(repo, template)
+    return missing, result
+
+def template_compliance_targeting(
+    org_name: Optional[str] = None, 
+    repo_name: Optional[str] = None, 
+    user_name: Optional[str] = None,
+    template_name: Optional[str] = None
+    ) -> Tuple[Union[Repository, List[Repository]], RepoTemplate]:
+    """template_compliance_targeting
+    Take the provided arguments and interpret them to determine which repos to target
+    
+    Args:
+        org_name (Optional[str]): the name of the organization
+        repo_name (Optional[str]): the name of the repo
+        user_name (Optional[str]): the name of the user
+        template_name (Optional[str]): the name of the template repo
+    Returns:
+        target (Union[Repository, List[Repository]]): the target repo(s)
+        template (RepoTemplate): the template repo
+    """
+    if template_name:
+        if "/" in template_name:
+            template = RepoTemplate(template_name)
+        elif org_name:
+            template = RepoTemplate(f"{org_name}/{template_name}")
+        else:
+            raise ValueError("Template name provided without organization")
+    else:
+        template = TEMPLATE
+    if repo_name:
+        if "/" in repo_name:
+            target = get_repo(repo_name)
+        elif user_name:
+            target = get_user_repo(repo_name)
+        elif org_name:
+            target = get_org_repo(org_name, repo_name)
+        else:
+            raise ValueError("Repo name provided without organization or user")
+    elif org_name:
+        target = get_org_repos(org_name)
+    elif user_name:
+        target = get_user_repos(user_name)
+    else:
+        raise ValueError("No target provided")
+    return target, template
+
+def get_compliance_diffs(
+    target: Union[Repository, List[Repository]],
+    template: RepoTemplate
+    ) -> Dict[str, RepoStructureType]:
+    """get_compliance_diffs
+    Get the missing files for each repo
+    
+    Args:
+        target (Union[Repository, List[Repository]]): the target repo(s)
+        template (RepoTemplate): the template repo
+        
+    Returns:
+        diffs (Dict[str, RepoStructureType]): the missing files for each repo (if any)
+    """
+    diffs = {}
+    if isinstance(target, Repository):
+        missing, result = check_diff(target, template)
+        if missing:
+            diffs[target.full_name] = result
+    else:
+        for repo in target:
+            missing, result = check_diff(repo, template)
+            if missing:
+                diffs[repo.full_name] = result
+    return diffs
+
+def make_compliance_pr(
+    repo: Repository,
+    template_repo: Repository,
+    diff: RepoStructureType
+) -> bool:
+    """make_compliance_pr
+    Create a PR to make the repo compliant with the template
+    
+    Args:
+        repo (Repository): the target repo
+        diff (RepoStructureType): the missing files
+    """
+    if not diff or len(diff) == 0:
+        return False
+    repo_permissions = get_repo_permissions(repo)
+    PR_repo = repo if repo_permissions["push"] else make_pr_fork(repo)
+    branch_name = "repository_management_bot/template_compliance"
+    commit_msg = "Add missing files to make repo compliant with template"
+    pullreq_title = "Enforce Template Compliance"
+    template_repository_addr = template_repo.html_url
+    organization_name = template_repo.owner.login
+    organization_link = f"[{organization_name}]({template_repo.owner.html_url})"
+    template_repo_link = f"[{template_repo.name}]({template_repository_addr})"
+    target_repo_name = repo.full_name
+    pullreq_body = f"This PR adds missing files to make the `{target_repo_name}` repository compliant with the {organization_link}'s {template_repo_link} template."
+    pr_branch = make_pr_branch(PR_repo, branch_name)
+    changes = make_pr_commit(PR_repo, pr_branch, diff)
+    if len(changes) == 0:
+        clean_tip(repo)
+        return False
+    pullreq_body += "\n\nChanges made:\n"
+    repo_link = repo.html_url
+    branch_link = f"{repo_link}/tree/{branch_name}"
+    for name, content in changes.items():
+        content_link = f"{branch_link}/{content.path}"
+        pullreq_body += f" - Added [{name}]({content_link})\n"
+    pullreq_body += "\nThis PR was automatically generated by the [Repository Management Bot]("
+    pullreq_body += "https://github.com/chp2001/repository-management-bot)."
+    fprint("-" * 80)
+    fprint(pullreq_body)
+    fprint("-" * 80)
+    cont = input("Create PR? (y/N): ")
+    if cont.lower() != "y":
+        clean_tip(repo)
+        return False
+    push_pr_commit(PR_repo, branch_name, commit_msg)
+    make_pr(repo, PR_repo, pr_branch, pullreq_title, pullreq_body)
+    clean_tip(repo)
+    return True
+
+def compliance_pr_dispatch(
+    user_name: Optional[str] = None,
+    org_name: Optional[str] = None,
+    repo_name: Optional[str] = None,
+    template_name: Optional[str] = None
+):
+    """compliance_pr_dispatch
+    Create PRs to make the target repo(s) compliant with the template
+    
+    Args:
+        user_name (Optional[str]): the name of the user
+        org_name (Optional[str]): the name of the organization
+        repo_name (Optional[str]): the name of the repo
+        template_name (Optional[str]): the name of the template repo
+    """
+    target, template = template_compliance_targeting(
+        user_name=user_name,
+        org_name=org_name,
+        repo_name=repo_name,
+        template_name=template_name
+    )
+    fprint(f"Targeting {target} with template {template.template_repo.full_name}")
+    # diffs = get_compliance_diffs(target, template)
+    result = []
+    if isinstance(target, Repository):
+        fprint(f"Targeting {target.full_name}")
+        diffs = get_compliance_diffs(target, template)
+        if target.full_name in diffs:
+            fprint(f"{target.full_name} is missing at least {len(diffs[target.full_name])} files")
+            cont = input("Prepare PR for {target.full_name}? (y/N): ")
+            if cont.lower() == "y":
+                if make_compliance_pr(target, template.template_repo, diffs[target.full_name]):
+                    result.append(target)
+        else:
+            fprint(f"{target.full_name} is already compliant. Skipping.")
+    else:
+        num = len(target)
+        _i = 0
+        for repo in target:
+            _i += 1
+            check = input(f"{_i}/{num}) Check {repo.full_name}? (y/N): ")
+            if check.lower() != "y":
+                continue
+            diffs = get_compliance_diffs(repo, template)
+            if repo.full_name in diffs:
+                fprint(f"{repo.full_name} is missing at least {len(diffs[repo.full_name])} files")
+                cont = input(f"Prepare PR for {repo.full_name}? (y/N): ")
+                if cont.lower() == "y":
+                    if make_compliance_pr(repo, template.template_repo, diffs[repo.full_name]):
+                        result.append(repo)
+            else:
+                fprint(f"{repo.full_name} is already compliant. Skipping.")
+    fprint(f"PRs created for {len(result)} repos")
+    fprint(result)
+    return
+    
+    
+
 if __name__ == "__main__":
     def test_permissions():
         # Get the 'bmi_rainrate' repo
