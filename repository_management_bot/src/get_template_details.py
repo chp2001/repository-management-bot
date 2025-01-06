@@ -1,7 +1,7 @@
 from .includes import *
     
 from .access_gh import get_repo
-from .repo_detail import get_repo_structure, RepoStructureType
+from .repo_detail import get_pr_structure, get_ref_structure, get_repo_structure, RepoStructureType, get_branch_structure
 
 AWI_ORG_NAME = "AlabamaWaterInstitute"
 AWI_TEMPLATE_REPO = "awi-open-source-project-template"
@@ -97,6 +97,22 @@ class RepoTemplate:
     def compare_repo(self, repo: Repository)->RepoStructureType:
         repo_structure = get_repo_structure(repo)
         return self.compare_repo_structure(repo_structure)
+    
+    def compare_branch(self, repo: Repository, branch: str)->RepoStructureType:
+        repo_structure = get_branch_structure(repo, branch)
+        return self.compare_repo_structure(repo_structure)
+    
+    def compare_ref(self, repo: Repository, ref: str)->RepoStructureType:
+        repo_structure = get_ref_structure(repo, ref)
+        return self.compare_repo_structure(repo_structure)
+    
+    def compare_pr(self, pr: PullRequest)->RepoStructureType:
+        repo_structure = get_pr_structure(pr)
+        return self.compare_repo_structure(repo_structure)
+    
+    @staticmethod
+    def from_repo(repo: Repository)->"RepoTemplate":
+        return RepoTemplate(repo.full_name)
 
 if __name__ == "__main__":
     repo, repo_dir, repo_file = get_template_details()

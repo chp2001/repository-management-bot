@@ -73,8 +73,12 @@ def get_repo_branches(repo: Repository)->List[Branch]:
     return list(repo.get_branches())
 
 @cache
+def get_repo_branch(repo: Repository, branch: str)->Branch:
+    return repo.get_branch(branch)
+
+@cache
 def get_repo_main_branch(repo: Repository)->Branch:
-    return repo.get_branch(repo.default_branch)
+    return get_repo_branch(repo, repo.default_branch)
 
 @cache
 def get_repo_main_dir(repo: Repository)->List[ContentFile]:
@@ -86,8 +90,8 @@ def contentfile_isdir(cf: ContentFile)->bool:
 def contentfile_isfile(cf: ContentFile)->bool:
     return cf.type == "file"
 @cache
-def get_repo_dir(repo: Repository, dir: str)->List[ContentFile]:
-    content = repo.get_contents(dir)
+def get_repo_dir(repo: Repository, dir: str, **kwargs)->List[ContentFile]:
+    content = repo.get_contents(dir, **kwargs)
     if isinstance(content, ContentFile):
         return [content]
     else:
