@@ -8,7 +8,7 @@ from github.PullRequest import PullRequest
 from typing import List, Tuple, Dict, Set, Any, Union, Callable, Literal, Optional, TypeVar
 import os, sys, json
 from pathlib import Path
-from .caching import cache, cache_stats
+from repository_management_bot.src.caching import cache, cache_stats
 import warnings
 User = Union[NamedUser, AuthenticatedUser]
 
@@ -25,3 +25,8 @@ def fprint(*args, **kwargs):
         if isinstance(v, str):
             kwargs[k] = v.replace("\t", customtab)
     print(*args, file=sys.stderr, **kwargs)
+    
+this_repo = "repository_management_bot"
+this_repo_author = "chp2001"
+this_repo_path = f"{this_repo_author}/{this_repo}"
+this_repo_link = f"https://www.github.com/{this_repo_path}"

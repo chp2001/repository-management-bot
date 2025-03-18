@@ -1,4 +1,4 @@
-from .includes import *
+from repository_management_bot.src.includes import *
 from github import Github
 
 @cache
@@ -103,6 +103,9 @@ def get_repo_file(repo: Repository, file: str)->ContentFile:
         return content
     else:
         raise ValueError(f"{file} is not a file")
+@cache
+def get_repo_pulls(repo: Repository)->List[PullRequest]:
+    return list(repo.get_pulls())
 
 if __name__ == "__main__":
     def quicklook_t(obj: type[object]):

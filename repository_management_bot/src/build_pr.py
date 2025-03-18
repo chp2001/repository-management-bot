@@ -1,25 +1,10 @@
-from .includes import *
-import subprocess
+from repository_management_bot.src.pr_utilities import check_diff, check_pr_diff, clean_tip, count_diff, get_pr_with_user_and_branch, get_prs_with_branch, get_repo_permissions, make_pr, make_pr_branch, make_pr_commit, make_pr_fork, prep_pr_commit, push_pr_commit, flatten_pr_diff
+from repository_management_bot.src.includes import *
 
-def check_output(cmd: str, **kwargs)->str:
-    try:
-        kwargs["shell"] = True
-        kwargs["stderr"] = subprocess.PIPE
-        kwargs["text"] = True
-        result = subprocess.check_output(cmd, **kwargs)
-        if isinstance(result, bytes):
-            return result.decode("utf-8")
-        return result
-    except subprocess.CalledProcessError as e:
-        result = e.output
-        if isinstance(result, bytes):
-            return result.decode("utf-8")
-        return result
-    
-from .access_gh import get_user, get_user_repos, get_org_repos, get_org_repo, get_user_repo, get_repo, get_repo_branch
+from repository_management_bot.src.access_gh import get_user, get_user_repos, get_org_repos, get_org_repo, get_user_repo, get_repo
 
-from .get_template_details import RepoTemplate, AWI_TEMPLATE_REPO, AWI_ORG_NAME
-from .repo_detail import get_repo_structure, RepoStructureType
+from repository_management_bot.src.get_template_details import RepoTemplate, AWI_TEMPLATE_REPO, AWI_ORG_NAME
+from repository_management_bot.src.repo_detail import get_repo_structure, RepoStructureType
 
 TEMPLATE = RepoTemplate()
 CLONE_DIR = Path("clones")
@@ -27,86 +12,6 @@ CLONE_DIR = Path("clones")
 if not CLONE_DIR.exists():
     CLONE_DIR.mkdir()
 
-def __count_diff(structure: RepoStructureType)->int:
-    count = 0
-    for name, content in structure.items():
-        if isinstance(content, ContentFile):
-            count += 1
-        else:
-            count += __count_diff(content)
-    return count
-
-@cache
-def check_diff(repo: Repository, template: RepoTemplate = TEMPLATE)->Tuple[bool, Optional[RepoStructureType]]:
-    """check_diff
-    Check if pieces of the template repo are missing from the target repo.
-    If so, return the missing pieces.
-    
-    Args:
-        repo (Repository): the target repo
-    Returns:
-        result_tup (Tuple[bool, Optional[RepoStructureType]]):  (missing, missing_structure)
-    """
-    result = template.compare_repo(repo)
-    # print(result) 
-    
-    missing = __count_diff(result)
-    if missing == 0:
-        return False, None
-    return True, result
-
-def check_branch_diff(repo: Repository, branch: str, template: RepoTemplate = TEMPLATE)->Tuple[bool, Optional[RepoStructureType]]:
-    """check_branch_diff
-    Check if pieces of the template repo are missing from the target repo branch.
-    If so, return the missing pieces.
-    
-    Args:
-        repo (Repository): the target repo
-        branch (str): the branch to check
-    Returns:
-        result_tup (Tuple[bool, Optional[RepoStructureType]]):  (missing, missing_structure)
-    """
-    result = template.compare_branch(repo, branch)
-
-    missing = __count_diff(result)
-    if missing == 0:
-        return False, None
-    return True, result
-
-def check_pr_diff(pr: PullRequest, template: RepoTemplate = TEMPLATE)->Tuple[bool, Optional[RepoStructureType]]:
-    """check_pr_diff
-    Check if pieces of the template repo are missing from the target PR.
-    If so, return the missing pieces.
-    
-    Args:
-        pr (PullRequest): the target PR
-    Returns:
-        result_tup (Tuple[bool, Optional[RepoStructureType]]):  (missing, missing_structure)
-    """
-    result = template.compare_pr(pr)
-
-    missing = __count_diff(result)
-    if missing == 0:
-        return False, None
-    return True, result
-
-def check_ref_diff(repo: Repository, ref: str, template: RepoTemplate = TEMPLATE)->Tuple[bool, Optional[RepoStructureType]]:
-    """check_ref_diff
-    Check if pieces of the template repo are missing from the target ref.
-    
-    Args:
-        repo (Repository): the target repo
-        ref (str): the ref to check
-    Returns:
-        result_tup (Tuple[bool, Optional[RepoStructureType]]):  (missing, missing_structure)
-    """
-    result = template.compare_ref(repo, ref)
-
-    missing = __count_diff(result)
-    if missing == 0:
-        return False, None
-    return True, result
-    
 # Prepare to submit a PR
 # 1. Check if the repo is missing any files
 # 2. If we have permission to create a branch, create a branch
@@ -116,311 +21,13 @@ def check_ref_diff(repo: Repository, ref: str, template: RepoTemplate = TEMPLATE
 # 5. Create a PR
 # 6. Done
 
-@cache
-def get_repo_permissions(repo: Repository)->Dict[str, bool]:
-    """get_repo_permissions
-    Get the permissions for the authenticated user on the repo.
-    
-    Args:
-        repo (Repository): the target repo
-    Returns:
-        permissions (Dict[str, bool]): the permissions for the authenticated user
-    """
-    user = get_user()
-    results = {}
-    # Check if the user has push access
-    result = check_output(f"gh api repos/{repo.full_name}/collaborators/{user.login}/permission", shell=True)
-    try:
-        response = json.loads(result)
-        status = int(response["status"]) if "status" in response else 0
-        if status == 403:
-            results["push"] = False
-        elif status == 200:
-            results["push"] = True
-        elif "user" in response:
-            if "permissions" in response["user"]:
-                results.update(response["user"]["permissions"])
-        else:
-            raise
-    except Exception as e:
-        results["push"] = False
-        warnings.warn(f"Unexpected response from GitHub API: {result}, {e}")
-    if "push" not in results:
-        results["push"] = False
-    if "read" not in results:
-        # Check if the user has read access
-        result = os.popen(f"git ls-remote {repo.clone_url}").read()
-        results["read"] = len(result) > 0
-    return results
-
-def clone_tip(repo: Repository, branch: Branch)->Path:
-    """clone_tip
-    Clone the tip (Bare minimum objects) of the repo to the specified path
-
-    Args:
-        repo (Repository): the target repo
-        branch (Branch): the branch to clone
-    Returns:
-        clone_path (Path): the path to the cloned repo
-    """
-    clone_path = CLONE_DIR / repo.full_name
-    if clone_path.exists():
-        return clone_path
-    os.system(f"git clone --depth 1 --branch {branch.name} {repo.clone_url} {clone_path}")
-    return clone_path
-
-def add_file_to_tip(repo: Repository, branch: Branch, content: ContentFile)->Path:
-    """add_file_to_tip
-    Add a file to the tip of the repo
-    
-    Args:
-        repo (Repository): the target repo
-        branch (Branch): the branch to add the file to
-        content (ContentFile): the file to add
-    Returns:
-        path (Path): the path to the added file
-    """
-    clone_path = clone_tip(repo, branch)
-    file_path = clone_path / content.path
-    if file_path.exists():
-        fprint(f"File already exists: {file_path}")
-        return clone_path
-    file_path.parent.mkdir(parents=True, exist_ok=True)
-    with open(file_path, "wb") as f:
-        f.write(content.decoded_content)
-    return file_path
-
-def push_changes_to_tip(repo: Repository, branch: Branch, commit_message: str)->Path:
-    """push_changes_to_tip
-    Push the changes to the tip of the repo
-    
-    Args:
-        repo (Repository): the target repo
-        branch (Branch): the branch to push to
-        commit_message (str): the commit message
-    Returns:
-        clone_path (Path): the path to the cloned repo
-    """
-    clone_path = clone_tip(repo, branch)
-    result = check_output(f"cd {clone_path} && git add . && git commit -m '{commit_message}' && git push origin {branch.name}")
-    return clone_path
-
-def clean_tip(repo: Repository)->Path:
-    """clean_tip
-    Clean the tip of the repo
-    
-    Args:
-        repo (Repository): the target repo
-    Returns:
-        clone_path (Path): the path to the cloned repo
-    """
-    clone_path = CLONE_DIR / repo.full_name
-    if not clone_path.exists():
-        return clone_path
-    result = check_output(f"rm -rf {clone_path}")
-    return clone_path
-
-def make_pr_fork(repo: Repository)->Repository:
-    """make_pr_fork
-    Create a fork of the repo
-    
-    Args:
-        repo (Repository): the target repo
-    Returns:
-        fork (str): the name of the fork
-    """
-    # Check if the fork already exists
-    user = get_user()
-    try:
-        fork = user.get_repo(repo.full_name)
-        if fork is not None:
-            return fork
-    except:
-        pass
-    # Create the fork
-    fork = repo.create_fork()
-    return fork
-    
-
-def make_pr_branch(repo: Repository, branch_name: str)->Optional[Branch]:
-    """make_pr_branch
-    Create a branch on the repo
-    
-    Args:
-        repo (Repository): the target repo
-        branch_name (str): the name of the branch
-    Returns:
-        branch (Branch): the branch that was created
-    """
-    perms = get_repo_permissions(repo)
-    default_branch = repo.get_branch(repo.default_branch)
-    default_sha = default_branch.commit.sha
-    target_loc = repo
-    if not perms["push"]:
-        confirm = input(f"User lacks push permissions. Create a personal fork? (y/N): ")
-        if confirm.lower() == "y":
-            target_loc = make_pr_fork(repo)
-        else:
-            return None
-    try:
-        branch = target_loc.get_branch(branch_name)
-        if branch is not None:
-            return branch
-    except:
-        pass
-    result = target_loc.create_git_ref(f"refs/heads/{branch_name}", default_sha)
-    branch = target_loc.get_branch(branch_name)
-    return branch
-
-def make_pr_commit(repo: Repository, branch: Branch, structure: RepoStructureType, changes: Dict[str, ContentFile] = {}) -> Dict[str, ContentFile]:
-    """make_pr_commit
-    Create a commit on the branch that adds the structure to the repo
-    
-    Args:
-        repo (Repository): the target repo
-        branch (Branch): the branch to commit to
-        structure (RepoStructureType): the structure to commit
-        changes (Dict[str, str]): the changes that were made
-    Returns:
-        changes (Dict[str, str]): the changes that were made
-    """
-    for name, content in structure.items():
-        if isinstance(content, ContentFile):
-            add_file_to_tip(repo, branch, content)
-            changes[name] = content
-        else:
-            make_pr_commit(repo, branch, content, changes)
-    return changes
-
-def prep_pr_commit(repo: Repository, branch_name: str, template: RepoTemplate = TEMPLATE)->Dict[str, ContentFile]:
-    """prep_pr_commit
-    Prepare to submit a PR
-    
-    Args:
-        repo (Repository): the target repo
-        branch_name (str): the name of the branch
-    Returns:
-        changes (Dict[str, str]): the changes that were made
-    """
-    missing, structure = check_diff(repo, template=template)
-    if not structure:
-        return {}
-    branch = make_pr_branch(repo, branch_name)
-    if not branch:
-        return {}
-    changes = make_pr_commit(repo, branch, structure)
-    return changes
-
-def push_pr_commit(repo: Repository, branch_name: str, commit_message: str):
-    """push_pr_commit
-    Push the commit to the repo
-    
-    Args:
-        repo (Repository): the target repo
-        branch_name (str): the name of the branch
-        commit_message (str): the commit message
-    """
-    branch = repo.get_branch(branch_name)
-    push_changes_to_tip(repo, branch, commit_message)
-    return
-
-def make_pr(target_repo: Repository, PR_repository: Repository, PR_branch: Branch, PR_title: str, PR_body: str):
-    """make_pr
-    Create a PR
-    
-    Args:
-        target_repo (Repository): the target repo
-        PR_repository (Repository): the repo to create the PR from
-        PR_branch (Branch): the branch to create the PR from
-        PR_title (str): the title of the PR
-        PR_body (str): the body of the PR
-    """
-    # check if the PR already exists
-    prs = target_repo.get_pulls()
-    for pr in prs:
-        if pr.head.ref == PR_branch.name:
-            pr.edit(title=PR_title, body=PR_body)
-            return pr
-    pr = target_repo.create_pull(title=PR_title, body=PR_body, head=f"{PR_repository.owner.login}:{PR_branch.name}", base=target_repo.default_branch)
-    return pr
-
-def template_compliance_pr(repo: Repository, template: RepoTemplate = TEMPLATE, branch_name: str = "repository_management_bot/template_compliance"):
-    """template_compliance_pr
-    Create a PR to make the repo compliant with the template
-    
-    Args:
-        repo (Repository): the target repo
-    """
-    repo_permissions = get_repo_permissions(repo)
-    PR_repo = repo if repo_permissions["push"] else make_pr_fork(repo)
-    branch_name = branch_name
-    commit_msg = "Add missing files to make repo compliant with template"
-    pullreq_title = "Enforce Template Compliance"
-    template_repository_addr = template.template_repo.html_url
-    organization_name = template.template_repo.owner.login
-    organization_link = f"[{organization_name}]({template.template_repo.owner.html_url})"
-    template_repo_link = f"[{template.template_repo.name}]({template_repository_addr})"
-    target_repo_name = repo.full_name
-    pullreq_body = f"This PR adds missing files to make the `{target_repo_name}` repository compliant with the {organization_link}'s {template_repo_link} template."
-    changes = prep_pr_commit(PR_repo, branch_name)
-    if len(changes) == 0:
-        return
-    pullreq_body += "\n\nChanges made:\n"
-    repo_link = repo.html_url
-    branch_link = f"{repo_link}/tree/{branch_name}"
-    for name, content in changes.items():
-        content_link = f"{branch_link}/{content.path}"
-        pullreq_body += f" - Added [{name}]({content_link})\n"  
-    pullreq_body += "\nThis PR was automatically generated by the [Repository Management Bot](https://github.com/chp2001/repository-management-bot)."
-    push_pr_commit(PR_repo, branch_name, commit_msg)
-    make_pr(repo, PR_repo, PR_repo.get_branch(branch_name), pullreq_title, pullreq_body)
-    clean_tip(repo)
-    return
-
-def template_compliance_prs(org: str, template_repo: str):
-    """template_compliance_prs
-    Create PRs to make all the repos in the organization compliant with the template
-    
-    Args:
-        org (str): the organization
-        template_repo (str): the template repo
-    """
-    repos = get_org_repos(org)
-    template = RepoTemplate(f"{org}/{template_repo}")
-    for repo in repos:
-        missing, result = check_diff(repo, template)
-        if not missing:
-            continue
-        userinput = input(f"{repo.full_name} is missing:\n{result}\nCreate PR? (y/N): ")
-        if userinput.lower() == "y":
-            template_compliance_pr(repo, template)
-            print(f"PR created for {repo.full_name}")
-        elif userinput.lower() in ["q", "quit", "exit"]:
-            print("Exiting")
-            break
-        else:
-            print(f"Skipping {repo.full_name}")
-    return
-
-def check_template_compliance_for_repo(repo: Repository, template: RepoTemplate = TEMPLATE) -> Tuple[bool, Optional[RepoStructureType]]:
-    """check_template_compliance_for_repo
-    Check if the repo is compliant with the template
-    
-    Args:
-        repo (Repository): the target repo
-    Returns:
-        missing (bool): whether the repo is missing files
-        result (Optional[RepoStructureType]): the missing files
-    """
-    missing, result = check_diff(repo, template)
-    return missing, result
 
 def template_compliance_targeting(
     org_name: Optional[str] = None, 
     repo_name: Optional[str] = None, 
     user_name: Optional[str] = None,
     template_name: Optional[str] = None
-    ) -> Tuple[Union[Repository, List[Repository]], RepoTemplate]:
+    ) -> Tuple[List[Repository], RepoTemplate]:
     """template_compliance_targeting
     Take the provided arguments and interpret them to determine which repos to target
     
@@ -451,6 +58,7 @@ def template_compliance_targeting(
             target = get_org_repo(org_name, repo_name)
         else:
             raise ValueError("Repo name provided without organization or user")
+        target = [target]
     elif org_name:
         target = get_org_repos(org_name)
     elif user_name:
@@ -485,167 +93,349 @@ def get_compliance_diffs(
                 diffs[repo.full_name] = result
     return diffs
 
-def check_branch_exists(repo: Repository, branch_name: str) -> bool:
-    """check_branch_exists
-    Preemptively check if the branch exists before creating it
-    
-    Args:
-        repo (Repository): the target repo
-        branch_name (str): the name of the branch
-    Returns:
-        exists (bool): whether the branch exists
-    """
-    try:
-        branch = get_repo_branch(repo, branch_name)
-        return branch is not None
-    except:
-        return False
-    
-def check_pr_exists(repo: Repository, branch_name: str) -> bool:
-    """check_pr_exists
-    Preemptively check if the PR exists before creating it
-    
-    Args:
-        repo (Repository): the target repo
-        branch_name (str): the name of the branch
-    Returns:
-        exists (bool): whether the PR exists
-    """
-    prs = repo.get_pulls()
-    for pr in prs:
-        if pr.head.ref == branch_name:
-            return True
-    return False
-
-def get_pr_with_user_and_branch(repo: Repository, user: str, branch_name: str) -> Optional[PullRequest]:
-    """get_pr_with_user_and_branch
-    
-    Args:
-        repo (Repository): the target repo
-        user (str): the user
-        branch_name (str): the name of the branch
-    Returns:
-        pr (Optional[PullRequest]): the PR
-    """
-    prs = repo.get_pulls()
-    for pr in prs:
-        if pr.head.ref == branch_name and pr.user.login == user:
-            return pr
-    return None
-
-def make_compliance_pr(
+def make_pr_body(
     repo: Repository,
     template_repo: Repository,
-    diff: RepoStructureType,
+    changes: Dict[str, ContentFile],
     branch_name: str = "repository_management_bot/template_compliance",
-    intend_update: bool = False
-) -> bool:
-    """make_compliance_pr
-    Create a PR to make the repo compliant with the template
+) -> str:
+    """make_pr_body
+    Create the body for the PR.
+    
+    Does not do any actions on repositories, only prepares
+    the body text for a PR.
     
     Args:
         repo (Repository): the target repo
-        diff (RepoStructureType): the missing files
+        template_repo (Repository): the template repo
+        changes (Dict[str, ContentFile]): the changes made
+        branch_name (str): the name of the branch
+    Returns:
+        body (str): the body of the PR
     """
-    if not diff or len(diff) == 0:
-        return False
-    repo_permissions = get_repo_permissions(repo)
-    PR_repo = repo if repo_permissions["push"] else make_pr_fork(repo)
-    # branch_name = "repository_management_bot/template_compliance"
-    commit_msg = "Add missing files to make repo compliant with template"
-    pullreq_title = "Enforce Template Compliance"
     template_repository_addr = template_repo.html_url
     organization_name = template_repo.owner.login
     organization_link = f"[{organization_name}]({template_repo.owner.html_url})"
     template_repo_link = f"[{template_repo.name}]({template_repository_addr})"
     target_repo_name = repo.full_name
     pullreq_body = f"This PR adds missing files to make the `{target_repo_name}` repository compliant with the {organization_link}'s {template_repo_link} template."
-    pr_branch = make_pr_branch(PR_repo, branch_name)
-    if not pr_branch:
-        return False
-    changes = make_pr_commit(PR_repo, pr_branch, diff)
-    if len(changes) == 0:
-        clean_tip(repo)
-        return False
-    pullreq_body += "\n\nChanges made:\n"
     repo_link = repo.html_url
     branch_link = f"{repo_link}/tree/{branch_name}"
     for name, content in changes.items():
         content_link = f"{branch_link}/{content.path}"
         pullreq_body += f" - Added [{name}]({content_link})\n"
     pullreq_body += "\nThis PR was automatically generated by the [Repository Management Bot]("
-    pullreq_body += "https://github.com/chp2001/repository-management-bot)."
-    if intend_update:
-        # pr_exists = check_pr_exists(repo, branch_name)
-        current_pr = get_pr_with_user_and_branch(repo, get_user().login, branch_name)
-        if current_pr is not None:
-            has_diffs, same_pr_diff = check_pr_diff(current_pr, RepoTemplate.from_repo(template_repo))
-            if not has_diffs:
-                # Check if information is the same
-                current_pr_body = current_pr.body
-                current_pr_title = current_pr.title
-                if current_pr_body == pullreq_body and current_pr_title == pullreq_title:
-                    print(f"PR already exists with correct changes. No changes made.")
-                    clean_tip(repo)
-                    return False
-                current_pr_author = current_pr.user.login
-                current_user = get_user()
-                if current_pr_author == current_user.login:
-                    current_pr.edit(title=pullreq_title, body=pullreq_body)
-                    print(f"PR already exists with correct changes. Updated PR title and body.")
-                elif input(f"PR already exists with correct changes, but is owned by {current_pr_author} instead of {current_user.login}. Attempt to update? (y/N): ").lower() == "y":
-                    current_pr.edit(title=pullreq_title, body=pullreq_body)
-                clean_tip(repo)
-                return False
-    fprint("-" * 80)
-    fprint(pullreq_body)
-    fprint("-" * 80)
-    cont = input("Create PR? (y/N): ")
-    if cont.lower() != "y":
+    pullreq_body += f"{this_repo_link})."
+    return pullreq_body
+
+def make_pr_title(*args, **kwargs) -> str:
+    """make_pr_title
+    Create the title for the PR.
+    
+    Does not do anything currently, only returns a string.
+    
+    Args:
+        *args: positional arguments
+        **kwargs: keyword arguments
+    Returns:
+        title (str): the title of the PR
+    """
+    return "Enforce Template Compliance"
+    
+# Splitting the previous larger function into smaller functions
+
+def prepare_pr_changes(repo: Repository, diff: RepoStructureType, branch_name: str = "repository_management_bot/template_compliance") -> Dict[str, ContentFile]:
+    """prepare_pr_changes
+    Prepare the changes for a PR by adding the missing files to the tip of the repo
+    
+    Args:
+        repo (Repository): the target repo
+        template_repo (Repository): the template repo
+        diff (RepoStructureType): the missing files
+        branch_name (str): the name of the branch
+    Returns:
+        changes (Dict[str, ContentFile]): the changes that were made
+    """
+    branch = make_pr_branch(repo, branch_name)
+    if not branch:
+        return {}
+    changes = make_pr_commit(repo, branch, diff)
+    if len(changes) == 0:
+        clean_tip(repo)
+        return {}
+    return changes
+
+
+# given that we already have an existing PR with correct changes applied, we can attempt to update the PR
+def try_update_pr_info(
+    repo: Repository,
+    current_pr: PullRequest,
+    pr_title: str,
+    pr_body: str
+) -> bool:
+    """try_update_pr_info
+    Attempt to update the PR with new information
+    
+    Args:
+        repo (Repository): the target repo
+        current_pr (PullRequest): the current PR
+        pr_title (str): the new title
+        pr_body (str): the new body
+    Returns:
+        updated (bool): whether the PR was updated
+    """
+    current_pr_body = current_pr.body
+    current_pr_title = current_pr.title
+    if current_pr_body == pr_body and current_pr_title == pr_title:
+        print(f"PR already exists with correct changes. No changes made.")
         clean_tip(repo)
         return False
-    push_pr_commit(PR_repo, branch_name, commit_msg)
-    make_pr(repo, PR_repo, pr_branch, pullreq_title, pullreq_body)
+    current_pr_author = current_pr.user.login
+    current_user = get_user()
+    if current_pr_author == current_user.login:
+        current_pr.edit(title=pr_title, body=pr_body)
+        print(f"Updated existing PR with up-to-date title and body.")
+    elif input(f"PR already exists with correct changes, but is owned by {current_pr_author} instead of {current_user.login}. Attempt to update? (y/N): ").lower() == "y":
+        try:
+            current_pr.edit(title=pr_title, body=pr_body)
+            print(f"Updated existing PR with up-to-date title and body.")
+        except Exception as e:
+            print(f"Error updating PR for {repo.full_name}: {e}")
+    clean_tip(repo)
+    return False
+
+# given that a PR exists, but has incomplete or incorrect changes, we can attempt to update the PR by committing to the branch
+# this only affects the relevant branch, fork, and/or commit, not the PR
+def try_update_pr_branch(
+    repo: Repository,
+    diff: Optional[RepoStructureType] = None,
+    changes: Optional[Dict[str, ContentFile]] = None,
+    branch_name: str = "repository_management_bot/template_compliance",
+) -> bool:
+    """try_update_pr_branch
+    Attempt to update the PR by committing to the branch
+    
+    Either `diff` or `changes` must be provided.
+    
+    Args:
+        repo (Repository): the target repo
+        diff (Optional[RepoStructureType]): the missing files
+        changes (Optional[Dict[str, ContentFile]]): the changes to be made
+        branch_name (str): the name of the branch
+    Returns:
+        updated (bool): whether the PR was updated
+    """
+    branch = make_pr_branch(repo, branch_name)
+    if not branch:
+        return False
+    if not changes:
+        if not diff:
+            raise ValueError("Either `diff` or `changes` must be provided")
+        changes = make_pr_commit(repo, branch, diff)
+    if len(changes) == 0:
+        clean_tip(repo)
+        return False
+    print(f"Local commit has {len(changes)} changes")
+    query = input("Push changes to PR branch? (y/N): ")
+    if query.lower() != "y":
+        clean_tip(repo)
+        return False
+    push_pr_commit(repo, branch_name, "Add missing files to make repo compliant with template")
     clean_tip(repo)
     return True
 
-def handle_pr_dispatch(
-    target: Repository,
-    template: RepoTemplate,
-    branch_name: str = "repository_management_bot/template_compliance"
-)->Optional[Repository]:
-    fprint(f"Targeting {target.full_name}")
-    diffs = get_compliance_diffs(target, template)
-    if target.full_name in diffs:
-        fprint(f"{target.full_name} is missing at least {len(diffs[target.full_name])} files")
-        # br_exists = check_branch_exists(target, branch_name)
-        # pr_exists = check_pr_exists(target, branch_name)
-        current_pr = get_pr_with_user_and_branch(target, get_user().login, branch_name)
-        cont_pr = "n"
-        if current_pr is not None:
-            # current_pr = target.get_pulls(head=f"{target.owner.login}:{branch_name}")[0]
-            has_diffs, same_pr_diff = check_pr_diff(current_pr, template)
-            if not has_diffs:
-                current_pr_title = current_pr.title
-                current_pr_author = current_pr.user.login
-                current_pr_ref = current_pr.head.ref
-                print(f"PR already exists for {target.full_name} with branch {branch_name} ({current_pr_title} by {current_pr_author}).")
-                print(f"PR is up to date with template.")
-                cont_pr = input(f"\tContinuing will validate and/or try to update the PR itself. Continue? (y/N): ")
-                if cont_pr.lower() != "y":
-                    return
-            elif same_pr_diff is not None:
-                print(f"PR for {target.full_name} exists, but has {__count_diff(same_pr_diff)} differences. Continuing with intent to update or replace.")
-                
-        cont = input(f"Prepare PR for {target.full_name}? (y/N): ") if cont_pr.lower() != "y" else "y"
-        if cont.lower() == "y":
-            if make_compliance_pr(target, template.template_repo, diffs[target.full_name], branch_name, intend_update=cont_pr.lower() == "y"):
-                return target
-            else:
-                print(f"Aborted PR creation for {target.full_name}")
+def query_pr_continue(
+    pr_body: str
+) -> bool:
+    """query_pr_continue
+    Query the user to continue with the PR
+    
+    Args:
+        pr_title (str): the title of the PR
+        pr_body (str): the body of the PR
+    Returns:
+        continue (bool): whether to continue with the PR
+    """
+    fprint("-" * 80)
+    fprint(pr_body)
+    fprint("-" * 80)
+    cont = input("Create PR? (y/N): ")
+    return cont.lower() == "y"
+
+# primary function will take the following arguments:
+# - repo: the target repo
+# - template_repo: the template repo
+# - diff: the missing files
+# - branch_name: the name of the branch
+# #- #intend_update: #whether to attempt to update the PR if it already exists ### Not needed
+
+# it will then logic branch into the following:
+# - if the repo is already compliant, do nothing
+# - calculate the changes using `flatten_pr_diff` with (diff)
+#   - if no changes were made, return failure
+# - calculate the PR title and body
+# - then, get existing PRs
+# - if a PR already exists from the current user, attempt to update the PR
+#   - -> `handle_pr_update` with (repo, changes, current_pr, pr_title, pr_body)
+#   - return success
+# - else if no PR exists, or no PRs from the current user exist, try to create a new PR
+#   - -> `handle_pr_create` with (repo, changes, branch_name, pr_title, pr_body)
+#   - return success
+# - else n/a
+#   - return failure
+
+# the `handle_pr_update` function will take the following arguments:
+# - repo: the target repo
+# - changes: the changes to be made
+# - branch_name: the name of the branch
+# - pr_title: the title of the PR
+# - pr_body: the body of the PR
+
+# (will only be called if a PR already exists)
+# it will then logic branch into the following:
+# - store a `made_changes` flag
+# - if the PR has incorrect changes
+#   - -> `try_update_pr_branch` with (repo, changes, branch_name)
+#   - notify the user of and set `made_changes` to whether the PR branch was updated
+# - if the PR has correct body and title
+#   - return `made_changes`
+# - if the PR has incorrect body or title
+#   - -> `try_update_pr_info` with (repo, current_pr, pr_title, pr_body)
+#   - notify the user of and set `made_changes = made_changes or success`
+# - return `made_changes`
+
+# the `handle_pr_create` function will take the following arguments:
+# - repo: the target repo
+# - changes: the changes to be made
+# - branch_name: the name of the branch
+# - pr_title: the title of the PR
+# - pr_body: the body of the PR
+
+# (will only be called if no PR exists, or confirmed when a PR exists but is not owned by the current user)
+# unlike update, this function will not require intensive branching
+# - branch = make_pr_branch(repo, branch_name)
+# - if branch is None, return failure
+# - changes = make_pr_commit(repo, branch, changes)
+# - if no changes were made:
+#  - clean_tip(repo)
+#  - return failure
+# - if not query_pr_continue(pr_body):
+#  - clean_tip(repo)
+#  - return failure
+# - push_pr_commit(repo, branch_name, "Add missing files to make repo compliant with template")
+# - make_pr(repo, repo, branch, pr_title, pr_body)
+# - clean_tip(repo)
+# - return success
+
+def handle_pr_update(
+    repo: Repository,
+    repotemplate: RepoTemplate,
+    changes: Dict[str, ContentFile],
+    current_pr: PullRequest,
+    pr_title: str,
+    pr_body: str
+) -> bool:
+    """handle_pr_update
+    Handle updating an existing PR
+    
+    Args:
+        repo (Repository): the target repo
+        changes (Dict[str, ContentFile]): the changes to be made
+        current_pr (PullRequest): the current PR
+        pr_title (str): the title of the PR
+        pr_body (str): the body of the PR
+    Returns:
+        updated (bool): whether the PR was updated
+    """
+    made_changes = False
+    if current_pr:
+        fprint(f"PR already exists for {repo.full_name} with branch {current_pr.head.ref}.")
+        has_diffs, same_pr_diff = check_pr_diff(current_pr, repotemplate)
+        if has_diffs:
+            made_changes = try_update_pr_branch(repo, changes=changes) or made_changes
+        made_changes = try_update_pr_info(repo, current_pr, pr_title, pr_body) or made_changes
+    return made_changes
+
+def handle_pr_create(
+    repo: Repository,
+    diff: RepoStructureType,
+    branch_name: str,
+    pr_title: str,
+    pr_body: str
+) -> bool:
+    """handle_pr_create
+    Handle creating a new PR
+    
+    Args:
+        repo (Repository): the target repo
+        diff (RepoStructureType): the missing files
+        branch_name (str): the name of the branch
+        pr_title (str): the title of the PR
+        pr_body (str): the body of the PR
+    Returns:
+        created (bool): whether the PR was created
+    """
+    branch = make_pr_branch(repo, branch_name)
+    if not branch:
+        return False
+    changes = make_pr_commit(repo, branch, diff)
+    if len(changes) == 0:
+        clean_tip(repo)
+        return False
+    if not query_pr_continue(pr_body):
+        clean_tip(repo)
+        return False
+    push_pr_commit(repo, branch_name, "Add missing files to make repo compliant with template")
+    make_pr(repo, repo, branch, pr_title, pr_body)
+    clean_tip(repo)
+    return True
+
+def handle_compliance_pr(
+    repo: Repository,
+    repotemplate: RepoTemplate,
+    diff: Optional[RepoStructureType] = None,
+    branch_name: str = "repository_management_bot/template_compliance",
+) -> bool:
+    """handle_compliance_pr
+    Create or update a PR to make the repo compliant with the template
+    
+    Replacing the previous `make_compliance_pr` and `handle_pr_dispatch` functions
+    
+    Args:
+        repo (Repository): the target repo
+        template_repo (RepoTemplate): the template repo
+        diff (Optional[RepoStructureType]): the missing files
+        branch_name (str): the name of the branch
+    Returns:
+        success (bool): whether the PR was created or updated
+    """
+    current_user = get_user().login
+    if not diff:
+        diff = get_compliance_diffs(repo, repotemplate)[repo.full_name]
+    changes = flatten_pr_diff(diff)
+    if len(changes) == 0:
+        fprint(f"{repo.full_name} is already compliant. Skipping further checks.")
+        return False
     else:
-        fprint(f"{target.full_name} is already compliant. Skipping.")
-    return None
+        fprint(f"{repo.full_name} is missing at least {len(changes)} files")
+    
+    pr_title = make_pr_title(repo, repotemplate, changes, branch_name)
+    pr_body = make_pr_body(repo, repotemplate.template_repo, changes, branch_name)
+    
+    current_pr = get_pr_with_user_and_branch(repo, current_user, branch_name)
+    current_prs = get_prs_with_branch(repo, branch_name)
+    if current_pr:
+        return handle_pr_update(repo, repotemplate, changes, current_pr, pr_title, pr_body)
+    elif current_prs:
+        plural = len(current_prs) > 1
+        msg = f"{len(current_prs)} PR" + ("s" if plural else "") + " already exist" + ("" if plural else "s") + f" for {repo.full_name} with branch {branch_name}."
+        fprint(msg)
+        fprint(f"PR author" + ("s" if plural else "") + f": {', '.join(pr.user.login for pr in current_prs)}")
+        # if input(f"Attempt to create new PR for {repo.full_name}? (y/N): ").lower() != "y":
+        #     return False
+        fprint(f"Github API does not allow for creating multiple PRs for the same branch. Skipping.")
+        return False
+    return handle_pr_create(repo, diff, branch_name, pr_title, pr_body)
 
 def compliance_pr_dispatch(
     user_name: Optional[str] = None,
@@ -670,27 +460,31 @@ def compliance_pr_dispatch(
     )
     branch_name = "repository_management_bot/template_compliance"
     fprint(f"Targeting {target} with template {template.template_repo.full_name}")
-    # diffs = get_compliance_diffs(target, template)
     result = []
-    if isinstance(target, Repository):
-        repo = target
-        res = handle_pr_dispatch(repo, template, branch_name)
+    if len(target) == 1:
+        repo = target[0]
+        res = handle_compliance_pr(
+            repo,
+            template,
+            branch_name=branch_name
+        )
         if res:
-            result.append(res)
+            result.append(repo.full_name)
     else:
-        num = len(target)
-        _i = 0
+        diffs = get_compliance_diffs(target, template)
         for repo in target:
-            _i += 1
-            check = input(f"{_i}/{num}) Check {repo.full_name}? (y/N): ")
-            if check.lower() != "y":
-                continue
-            res = handle_pr_dispatch(repo, template, branch_name)
+            diff = diffs[repo.full_name]
+            res = handle_compliance_pr(
+                repo,
+                template,
+                diff=diff,
+                branch_name=branch_name
+            )
             if res:
-                result.append(res)
+                result.append(repo.full_name)
     fprint(f"PRs created for {len(result)} repos")
     if result:
-        fprint(result) 
+        fprint(result)
     return
     
     
@@ -719,16 +513,3 @@ if __name__ == "__main__":
         os.system(f"cd {CLONE_DIR / repo.full_name} && git branch -D test-branch")
         clean_tip(repo)
         
-        
-    # test_pr_commit_prep()
-    
-    def test_full_pr():
-        repo = get_user_repo("load_factorio_data")
-        template_compliance_pr(repo)
-        
-    # test_full_pr()
-    
-    def test_template_compliance_prs():
-        template_compliance_prs(AWI_ORG_NAME, AWI_TEMPLATE_REPO)
-        
-    # test_template_compliance_prs()

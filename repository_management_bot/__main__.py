@@ -1,5 +1,5 @@
-from .src.build_pr import compliance_pr_dispatch
-from .cli.arguments import DefaultArgParse, ProgInfoExp
+from repository_management_bot.src.build_pr import compliance_pr_dispatch
+from repository_management_bot.cli.arguments import DefaultArgParse, ProgInfoExp
 
 if __name__ == "__main__":
     proginfo: ProgInfoExp = ProgInfoExp(
